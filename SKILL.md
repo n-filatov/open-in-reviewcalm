@@ -1,5 +1,6 @@
 ---
 name: open-in-reviewcalm
+argument-hint: "<github-pr-url|owner/repo#N>"
 description: >
   Open a GitHub pull request in the ReviewCalm desktop app from the terminal.
   Use when the user asks to open, view, or review a PR in ReviewCalm, or to
@@ -14,13 +15,14 @@ description: >
 Open a GitHub PR in the ReviewCalm desktop app — the skill an agent calls when
 the user says "open this PR in ReviewCalm".
 
-This skill is a thin wrapper over the `reviewcalm` CLI shipped with the
-ReviewCalm app. The CLI builds a `reviewcalm://open?url=<encoded>` deep link and
-hands it to macOS `open`; the app's `reviewcalm://` scheme routes the link
-through ReviewCalm's `openGitHubPullRequest` flow, which de-duplicates by tab id
-— so an already-open PR just gets its tab focused instead of being opened twice.
-ReviewCalm is a private macOS desktop app; this skill ships standalone and public
-so any agent/user can install and invoke it.
+This skill normalizes a PR reference, builds a
+`reviewcalm://open?url=<encoded>` deep link, and either opens it through the
+local browser/URL opener or prints the link for headless/VPS sessions. The app's
+`reviewcalm://` scheme routes the link through ReviewCalm's
+`openGitHubPullRequest` flow, which de-duplicates by tab id — so an already-open
+PR just gets its tab focused instead of being opened twice. ReviewCalm is a
+private macOS desktop app; this skill ships standalone and public so any
+agent/user can install and invoke it.
 
 ## When to use
 
@@ -31,35 +33,40 @@ so any agent/user can install and invoke it.
 
 ## Prerequisites (one-time)
 
-ReviewCalm must be installed and have registered its `reviewcalm://` URL scheme,
-and the `reviewcalm` CLI must be reachable from this skill.
+ReviewCalm must be installed on the machine where the link will be opened, and
+it must have registered its `reviewcalm://` URL scheme. Install/launch the app
+once on your local machine.
 
-```sh
-# 1. Build + install the app so the reviewcalm:// scheme registers with
-#    LaunchServices (ReviewCalm source is private — use the distributed build):
-#    place the .app in /Applications and launch it once.
+- On a local machine, the helper opens the link through the local browser/URL
+  opener.
+- On a VPS/headless agent, the helper prints the `reviewcalm://` link. The user
+  can click/copy that link locally; ReviewCalm opens the PR or focuses the
+  existing PR tab.
 
-# 2. Put the reviewcalm CLI on your PATH (reviewcalm/scripts/reviewcalm from
-#    a ReviewCalm source/release checkout):
-ln -sf /path/to/reviewcalm/scripts/reviewcalm /usr/local/bin/reviewcalm
-#   or: ln -sf /path/to/reviewcalm/scripts/reviewcalm ~/.local/bin/reviewcalm
-#   or: export REVIEWCALM_CLI=/path/to/reviewcalm/scripts/reviewcalm
+The private ReviewCalm `reviewcalm` CLI is not required for normal use. Legacy
+CLI delegation is still available with `--use-cli`.
+
+## Install
+
+See [README.md](README.md) for one-line installs for pi, Claude Code, OpenCode,
+Codex, and generic shell-capable agents. Where supported, the install exposes a
+slash command:
+
+```text
+/open-in-reviewcalm <github-pr-url|owner/repo#N>
 ```
 
-## Install this skill
+Codex currently namespaces custom prompts as `/prompts:open-in-reviewcalm` and
+supports skills via `$open-in-reviewcalm` / `/skills` rather than arbitrary
+custom top-level slash commands.
 
-Install it into any pi skills location (the repo root here IS the skill
-directory — it contains `SKILL.md`):
+## Slash usage
 
-```sh
-# Clone anywhere, then symlink the repo dir into a pi skills location:
-git clone https://github.com/n-filatov/open-in-reviewcalm.git
-ln -sf "$(pwd)/open-in-reviewcalm" ~/.pi/agent/skills/open-in-reviewcalm
-#   or, per-project: .pi/skills/open-in-reviewcalm
-```
-
-Pi loads skills from `~/.pi/agent/skills/`, `~/.agents/skills/`, project
-`.pi/skills/` (after trust), and the `skills` setting. See the pi skills docs.
+When invoked directly as `/open-in-reviewcalm <PR>`, run the bundled helper with
+the supplied PR reference. If the helper has also been symlinked onto PATH,
+`open-reviewcalm <PR>` is equivalent. If the helper prints a `reviewcalm://`
+link instead of opening it, surface that link to the user so they can click/copy
+it on their local machine.
 
 ## Usage
 
@@ -83,13 +90,15 @@ The helper:
    this is what makes "focus the existing tab" reliable).
 2. Validates it (GitHub host, `/pull/<positive integer>`). Incorrect input exits
    non-zero with a single error message.
-3. Delegates to the `reviewcalm` CLI (`reviewcalm` on PATH, or `$REVIEWCALM_CLI`),
-   which deep-links ReviewCalm open.
+3. Builds a `reviewcalm://open?url=<encoded>` deep link.
+4. Opens the link through the local browser/URL opener when available; otherwise
+   prints a clickable/copyable link for headless/VPS sessions.
 
 ### Dry run / inspection
 
-`--validate-only` prints the normalized URL and the deep link without opening
-anything — useful for confirming what will be opened:
+`--print-link` always prints the clickable/copyable ReviewCalm link without
+opening anything. `--validate-only` prints the normalized URL and deep link as
+machine-readable fields — useful for confirming what will be opened:
 
 ```sh
 ./scripts/open-reviewcalm.sh --validate-only https://github.com/Foo/Bar/pull/7/files

@@ -54,6 +54,29 @@ expect_fail() {
   pass=$((pass + 1))
 }
 
+# expect_print_link <description> <expected-normalized-url> <args...>
+expect_print_link() {
+  local desc="$1" expected_url="$2"; shift 2
+  local out code expected_deep
+  out=$("$helper" --print-link "$@" 2>&1) && code=0 || code=$?
+  if [ "$code" -ne 0 ]; then
+    echo "FAIL: $desc -> exit $code (expected 0). output: $out" >&2
+    fail=$((fail + 1)); return
+  fi
+  expected_deep=$("$helper" --validate-only "$@" | sed -n 's/^deep_link=//p')
+  case "$out" in
+    *"Open in ReviewCalm:"*"$expected_deep"*"GitHub PR:"*"$expected_url"*) ;;
+    *)
+      echo "FAIL: $desc -> printed link output mismatch" >&2
+      echo "  expected URL:  $expected_url" >&2
+      echo "  expected link: $expected_deep" >&2
+      echo "  output:        $out" >&2
+      fail=$((fail + 1)); return
+      ;;
+  esac
+  pass=$((pass + 1))
+}
+
 expect_ok "full https url" \
   "https://github.com/owner/repo/pull/123" \
   "https://github.com/owner/repo/pull/123"
@@ -89,6 +112,10 @@ expect_ok "three positional args" \
 expect_ok "case-insensitive owner/repo normalized to lowercase" \
   "https://github.com/octocat/hello-world/pull/1" \
   "https://github.com/OctoCat/Hello-World/pull/1"
+
+expect_print_link "print-link emits clickable ReviewCalm deep link" \
+  "https://github.com/foo/bar/pull/7" \
+  "https://github.com/Foo/Bar/pull/7/files"
 
 expect_fail "non-github host"        "https://gitlab.com/foo/bar/pull/1"
 expect_fail "issues url, not pull"   "https://github.com/foo/bar/issues/1"
