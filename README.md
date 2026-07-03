@@ -14,16 +14,19 @@ entry point an agent calls when the user says *"open this PR in ReviewCalm"*.
 
 ## What it does
 
-Given a GitHub PR reference, it:
+Given a GitHub PR reference — or no argument from inside a git branch — it:
 
-1. Normalizes it to a canonical
+1. If no reference is provided, finds the PR for the current branch with
+   `gh pr view --json url --jq .url`. If none exists, it asks whether to create
+   a PR instead of opening anything.
+2. Normalizes it to a canonical
    `https://github.com/<lowercased-owner>/<lowercased-repo>/pull/<number>` URL
    (owner/repo are case-insensitive on GitHub; lower-casing guarantees the same
    PR always maps to the same ReviewCalm tab id — this is what makes "focus the
    existing tab" reliable).
-2. Validates it (GitHub host, `/pull/<positive integer>`).
-3. Builds a `reviewcalm://open?url=<encoded>` deep link.
-4. If a local browser/URL opener is available, opens that link. If not (for
+3. Validates it (GitHub host, `/pull/<positive integer>`).
+4. Builds a `reviewcalm://open?url=<encoded>` deep link.
+5. If a local browser/URL opener is available, opens that link. If not (for
    example on a VPS/headless agent box), prints the link so you can click or
    copy it on a machine with ReviewCalm installed. ReviewCalm launches the app
    if needed and re-focuses the existing tab if that PR is already open
@@ -32,6 +35,7 @@ Given a GitHub PR reference, it:
 ### Accepted PR reference forms
 
 ```sh
+./scripts/open-reviewcalm.sh                         # current branch PR via gh pr view
 ./scripts/open-reviewcalm.sh https://github.com/owner/repo/pull/123
 ./scripts/open-reviewcalm.sh owner/repo#123
 ./scripts/open-reviewcalm.sh owner/repo/pull/123
@@ -61,6 +65,9 @@ machine-readable normalized fields:
 Install ReviewCalm on the machine where the link will be opened, and launch it
 once so the `reviewcalm://` URL scheme registers with the OS.
 
+For no-argument current-branch PR lookup, install and authenticate GitHub CLI
+(`gh`) in the agent environment.
+
 - **Local machine:** the command opens the link through the local browser/URL
   opener.
 - **VPS/headless agent:** the command prints the `reviewcalm://` link. Click or
@@ -76,7 +83,7 @@ below install the skill/helper and, where the agent supports custom slash
 commands, make this available as:
 
 ```text
-/open-in-reviewcalm https://github.com/owner/repo/pull/123
+/open-in-reviewcalm [https://github.com/owner/repo/pull/123]
 ```
 
 ### pi — `/open-in-reviewcalm`
@@ -87,7 +94,8 @@ mkdir -p ~/.pi/agent/skills ~/.pi/agent/prompts ~/.local/bin && git clone https:
 
 Pi auto-discovers the skill from `~/.pi/agent/skills/open-in-reviewcalm` and the
 slash prompt from `~/.pi/agent/prompts/open-in-reviewcalm.md`, so type
-`/open-in-reviewcalm <github-pr-url|owner/repo#N>` in pi.
+`/open-in-reviewcalm [github-pr-url|owner/repo#N]` in pi. With no argument, it
+opens the PR for the current branch or asks whether to create one.
 
 ### Claude Code — `/open-in-reviewcalm`
 
@@ -97,7 +105,8 @@ mkdir -p ~/.claude/skills ~/.local/bin && git clone https://github.com/n-filatov
 
 Claude Code auto-loads skills from `~/.claude/skills/<name>/SKILL.md`; the
 skill directory name becomes the slash command, so type
-`/open-in-reviewcalm <github-pr-url|owner/repo#N>`.
+`/open-in-reviewcalm [github-pr-url|owner/repo#N]`. With no argument, it opens
+the PR for the current branch or asks whether to create one.
 
 ### OpenCode — `/open-in-reviewcalm`
 
@@ -106,7 +115,8 @@ mkdir -p ~/.local/share ~/.local/bin ~/.config/opencode/commands && git clone ht
 ```
 
 OpenCode loads global custom commands from `~/.config/opencode/commands/`, so
-type `/open-in-reviewcalm <github-pr-url|owner/repo#N>`.
+type `/open-in-reviewcalm [github-pr-url|owner/repo#N]`. With no argument, it
+opens the PR for the current branch or asks whether to create one.
 
 ### Codex (OpenAI) — closest supported forms: `/prompts:open-in-reviewcalm` or `$open-in-reviewcalm`
 
@@ -119,8 +129,8 @@ Codex supports agent skills from `~/.agents/skills/` and custom prompts from
 custom commands as `/open-in-reviewcalm`. Use either:
 
 ```text
-/prompts:open-in-reviewcalm https://github.com/owner/repo/pull/123
-$open-in-reviewcalm https://github.com/owner/repo/pull/123
+/prompts:open-in-reviewcalm [https://github.com/owner/repo/pull/123]
+$open-in-reviewcalm [https://github.com/owner/repo/pull/123]
 ```
 
 ### Any other agent (universal)
@@ -131,7 +141,9 @@ If an agent only runs shell, install just the helper on `PATH`:
 mkdir -p ~/.local/share ~/.local/bin && git clone https://github.com/n-filatov/open-in-reviewcalm.git ~/.local/share/open-in-reviewcalm && ln -sf ~/.local/share/open-in-reviewcalm/scripts/open-reviewcalm.sh ~/.local/bin/open-reviewcalm
 ```
 
-Then ask the agent to run `open-reviewcalm <github-pr-url|owner/repo#N>`.
+Then ask the agent to run `open-reviewcalm [github-pr-url|owner/repo#N]`. With
+no argument, it opens the PR for the current branch or asks whether to create
+one.
 
 ## Run the self-test
 

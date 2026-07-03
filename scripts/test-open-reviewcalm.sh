@@ -77,6 +77,40 @@ expect_print_link() {
   pass=$((pass + 1))
 }
 
+expect_current_branch_pr() {
+  local desc="$1" expected_url="$2"
+  local tmp out code
+  tmp="$(mktemp -d)"
+  mkdir -p "$tmp/bin" "$tmp/repo"
+  cat >"$tmp/bin/gh" <<'EOS'
+#!/usr/bin/env bash
+if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
+  printf '%s\n' 'https://github.com/Owner/Repo/pull/9'
+  exit 0
+fi
+exit 1
+EOS
+  chmod +x "$tmp/bin/gh"
+  git -C "$tmp/repo" init -q
+  git -C "$tmp/repo" checkout -q -b feature/current-pr
+  out=$(cd "$tmp/repo" && PATH="$tmp/bin:$PATH" "$helper" --print-link 2>&1) && code=0 || code=$?
+  rm -rf "$tmp"
+  if [ "$code" -ne 0 ]; then
+    echo "FAIL: $desc -> exit $code (expected 0). output: $out" >&2
+    fail=$((fail + 1)); return
+  fi
+  case "$out" in
+    *"Open in ReviewCalm:"*"reviewcalm://open?url="*"GitHub PR:"*"$expected_url"*) ;;
+    *)
+      echo "FAIL: $desc -> current branch PR output mismatch" >&2
+      echo "  expected URL: $expected_url" >&2
+      echo "  output:       $out" >&2
+      fail=$((fail + 1)); return
+      ;;
+  esac
+  pass=$((pass + 1))
+}
+
 expect_ok "full https url" \
   "https://github.com/owner/repo/pull/123" \
   "https://github.com/owner/repo/pull/123"
@@ -116,6 +150,9 @@ expect_ok "case-insensitive owner/repo normalized to lowercase" \
 expect_print_link "print-link emits clickable ReviewCalm deep link" \
   "https://github.com/foo/bar/pull/7" \
   "https://github.com/Foo/Bar/pull/7/files"
+
+expect_current_branch_pr "no args resolves current branch PR with gh" \
+  "https://github.com/owner/repo/pull/9"
 
 expect_fail "non-github host"        "https://gitlab.com/foo/bar/pull/1"
 expect_fail "issues url, not pull"   "https://github.com/foo/bar/issues/1"

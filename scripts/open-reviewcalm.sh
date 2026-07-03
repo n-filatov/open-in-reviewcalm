@@ -14,6 +14,7 @@
 # same PR always maps to the same ReviewCalm tab id (`owner/repo#number`).
 #
 # Accepts:
+#   open-reviewcalm.sh                         # current branch PR via `gh pr view`
 #   open-reviewcalm.sh <github-pr-url>
 #   open-reviewcalm.sh <owner>/<repo>#<number>
 #   open-reviewcalm.sh <owner>/<repo>/pull/<number>
@@ -30,10 +31,15 @@ VALIDATE_ONLY=0
 
 usage() {
   cat >&2 <<'EOF'
-usage: open-reviewcalm.sh [--validate-only|--print-link|--use-cli] <github-pull-request-ref>
+usage: open-reviewcalm.sh [--validate-only|--print-link|--use-cli] [<github-pull-request-ref>]
        open-reviewcalm.sh [--validate-only|--print-link|--use-cli] <owner> <repo> <number>
 
+With no PR reference, opens the PR for the current git branch using `gh pr view`.
+If no PR exists for the current branch, it exits non-zero and asks whether to
+create one.
+
 examples:
+  open-reviewcalm.sh                         # current branch PR
   open-reviewcalm.sh https://github.com/owner/repo/pull/123
   open-reviewcalm.sh owner/repo#123
   open-reviewcalm.sh owner/repo/pull/123
@@ -125,6 +131,37 @@ $url
 EOF
 }
 
+resolve_current_branch_pr_url() {
+  if ! command -v git >/dev/null 2>&1; then
+    echo "No PR reference provided and git is not available." >&2
+    echo "Provide a GitHub PR URL or owner/repo#number." >&2
+    return 1
+  fi
+  if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "No PR reference provided and the current directory is not a git repository." >&2
+    echo "Provide a GitHub PR URL or owner/repo#number." >&2
+    return 1
+  fi
+  if ! command -v gh >/dev/null 2>&1; then
+    echo "No PR reference provided and GitHub CLI (gh) is not available." >&2
+    echo "Install/authenticate gh, or provide a GitHub PR URL or owner/repo#number." >&2
+    return 1
+  fi
+
+  local branch pr_url
+  branch="$(git branch --show-current 2>/dev/null || true)"
+  [ -n "$branch" ] || branch="detached HEAD"
+
+  if pr_url="$(gh pr view --json url --jq .url 2>/dev/null)" && [ -n "$pr_url" ]; then
+    printf '%s\n' "$pr_url"
+    return 0
+  fi
+
+  echo "No GitHub pull request found for current branch: $branch" >&2
+  echo "Ask me to create a PR for this branch, or run: gh pr create --web" >&2
+  return 1
+}
+
 # Resolve the reviewcalm CLI for legacy --use-cli mode, in priority order:
 #   1. $REVIEWCALM_CLI  (explicit override, e.g. /path/to/reviewcalm)
 #   2. `reviewcalm`      on PATH (the old install: symlink scripts/reviewcalm)
@@ -203,9 +240,16 @@ main() {
   set -- "${args[@]+"${args[@]}"}"
 
   if [ "$#" -eq 0 ]; then
-    echo "No pull request reference provided." >&2
-    usage
-    exit 2
+    if [ "$VALIDATE_ONLY" -eq 1 ]; then
+      echo "No pull request reference provided." >&2
+      usage
+      exit 2
+    fi
+    local current_branch_pr_url
+    if ! current_branch_pr_url="$(resolve_current_branch_pr_url)"; then
+      exit 3
+    fi
+    set -- "$current_branch_pr_url"
   fi
 
   local owner repo number ref
