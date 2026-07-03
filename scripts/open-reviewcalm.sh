@@ -2,12 +2,14 @@
 #
 # open-reviewcalm.sh — open a GitHub pull request in the ReviewCalm desktop app.
 #
-# Helper for the `open-in-reviewcalm` pi skill. Normalizes a PR reference into a
-# canonical `https://github.com/<owner>/<repo>/pull/<number>` URL and hands it to
-# the `reviewcalm` CLI, which deep-links it into the app via
-# `reviewcalm://open?url=<encoded>` and focuses the existing tab for that PR
-# when one is already open.
+# Helper for the `open-in-reviewcalm` agent skill. Normalizes a PR reference into
+# a canonical `https://github.com/<owner>/<repo>/pull/<number>` URL and builds a
+# `reviewcalm://open?url=<encoded>` deep link. By default it tries to open that
+# deep link with the local OS URL opener; on headless machines/VPSes it prints
+# the link so the user can click or copy it on a machine with ReviewCalm
+# installed.
 #
+# ReviewCalm focuses the existing tab for that PR when one is already open.
 # Canonical form lowers owner/repo to GitHub's case-insensitive casing so the
 # same PR always maps to the same ReviewCalm tab id (`owner/repo#number`).
 #
@@ -17,16 +19,19 @@
 #   open-reviewcalm.sh <owner>/<repo>/pull/<number>
 #   open-reviewcalm.sh github.com/<owner>/<repo>/pull/<number>
 #   open-reviewcalm.sh <owner> <repo> <number>
-#   open-reviewcalm.sh --validate-only <ref...>   # print URL + deep link, don't open
+#   open-reviewcalm.sh --validate-only <ref...>  # print URL + deep link, don't open
+#   open-reviewcalm.sh --print-link <ref...>     # print clickable/copyable link, don't open
+#   open-reviewcalm.sh --use-cli <ref...>        # legacy: delegate to `reviewcalm` CLI
 #   open-reviewcalm.sh --help
 set -euo pipefail
 
+MODE="auto"
 VALIDATE_ONLY=0
 
 usage() {
   cat >&2 <<'EOF'
-usage: open-reviewcalm.sh [--validate-only] <github-pull-request-ref>
-       open-reviewcalm.sh [--validate-only] <owner> <repo> <number>
+usage: open-reviewcalm.sh [--validate-only|--print-link|--use-cli] <github-pull-request-ref>
+       open-reviewcalm.sh [--validate-only|--print-link|--use-cli] <owner> <repo> <number>
 
 examples:
   open-reviewcalm.sh https://github.com/owner/repo/pull/123
@@ -34,6 +39,11 @@ examples:
   open-reviewcalm.sh owner/repo/pull/123
   open-reviewcalm.sh github.com/owner/repo/pull/123
   open-reviewcalm.sh owner repo 123
+
+options:
+  --validate-only  Print normalized url= and deep_link= fields, then exit.
+  --print-link     Print a clickable/copyable ReviewCalm deep link, then exit.
+  --use-cli        Legacy mode: delegate to the private ReviewCalm `reviewcalm` CLI.
 EOF
 }
 
@@ -104,11 +114,20 @@ parse_github_path() {
   fi
 }
 
-# Resolve the reviewcalm CLI, in priority order:
+print_reviewcalm_link() {
+  local url="$1" deep_link="$2"
+  cat <<EOF
+Open in ReviewCalm:
+$deep_link
+
+GitHub PR:
+$url
+EOF
+}
+
+# Resolve the reviewcalm CLI for legacy --use-cli mode, in priority order:
 #   1. $REVIEWCALM_CLI  (explicit override, e.g. /path/to/reviewcalm)
-#   2. `reviewcalm`      on PATH (the normal install: symlink scripts/reviewcalm)
-# This skill ships standalone from a public repo, so it never assumes a
-# checkout of the private ReviewCalm app repo is present next to it.
+#   2. `reviewcalm`      on PATH (the old install: symlink scripts/reviewcalm)
 resolve_reviewcalm_cli() {
   if [ -n "${REVIEWCALM_CLI:-}" ] && [ -x "$REVIEWCALM_CLI" ]; then
     printf '%s' "$REVIEWCALM_CLI"
@@ -121,12 +140,61 @@ resolve_reviewcalm_cli() {
   return 1
 }
 
+has_graphical_session() {
+  case "$(uname -s 2>/dev/null || printf unknown)" in
+    Darwin*) return 0 ;;
+    MINGW*|MSYS*|CYGWIN*) return 0 ;;
+  esac
+
+  [ -n "${DISPLAY:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ] || [ -n "${MIR_SOCKET:-}" ]
+}
+
+open_deep_link() {
+  local deep_link="$1"
+  local uname_s
+  uname_s="$(uname -s 2>/dev/null || printf unknown)"
+
+  case "$uname_s" in
+    Darwin*)
+      command -v open >/dev/null 2>&1 && open "$deep_link" >/dev/null 2>&1
+      return $?
+      ;;
+    MINGW*|MSYS*|CYGWIN*)
+      command -v cmd.exe >/dev/null 2>&1 && cmd.exe /c start "" "$deep_link" >/dev/null 2>&1
+      return $?
+      ;;
+  esac
+
+  # WSL can open links on the Windows host even without Linux DISPLAY/WAYLAND.
+  if command -v wslview >/dev/null 2>&1; then
+    wslview "$deep_link" >/dev/null 2>&1 && return 0
+  fi
+
+  # On normal Linux desktops, xdg-open/gio will hand the custom scheme to the
+  # registered handler. On headless VPSes, skip noisy open attempts and print.
+  if has_graphical_session; then
+    if command -v xdg-open >/dev/null 2>&1; then
+      xdg-open "$deep_link" >/dev/null 2>&1 && return 0
+    fi
+    if command -v gio >/dev/null 2>&1; then
+      gio open "$deep_link" >/dev/null 2>&1 && return 0
+    fi
+    if [ -n "${BROWSER:-}" ]; then
+      "$BROWSER" "$deep_link" >/dev/null 2>&1 && return 0
+    fi
+  fi
+
+  return 1
+}
+
 main() {
   local args=()
   while [ "$#" -gt 0 ]; do
     case "$1" in
       -h|--help) usage; exit 0 ;;
       --validate-only) VALIDATE_ONLY=1; shift ;;
+      --print-link|--no-open) MODE="print"; shift ;;
+      --use-cli) MODE="cli"; shift ;;
       --) shift; while [ "$#" -gt 0 ]; do args+=("$1"); shift; done ;;
       -*) echo "Unknown option: $1" >&2; usage; exit 2 ;;
       *) args+=("$1"); shift ;;
@@ -198,16 +266,31 @@ main() {
     exit 0
   fi
 
-  local cli
-  if ! cli="$(resolve_reviewcalm_cli)"; then
-    echo "Could not find the reviewcalm CLI." >&2
-    echo "Either symlink it onto your PATH once (from a ReviewCalm checkout):" >&2
-    echo "  ln -sf /path/to/reviewcalm/scripts/reviewcalm /usr/local/bin/reviewcalm" >&2
-    echo "or set REVIEWCALM_CLI=/path/to/reviewcalm." >&2
-    exit 1
+  if [ "$MODE" = "print" ]; then
+    print_reviewcalm_link "$url" "$deep_link"
+    exit 0
   fi
 
-  exec "$cli" "$url"
+  if [ "$MODE" = "cli" ]; then
+    local cli
+    if ! cli="$(resolve_reviewcalm_cli)"; then
+      echo "Could not find the reviewcalm CLI." >&2
+      echo "Either symlink it onto your PATH once (from a ReviewCalm checkout):" >&2
+      echo "  ln -sf /path/to/reviewcalm/scripts/reviewcalm /usr/local/bin/reviewcalm" >&2
+      echo "or set REVIEWCALM_CLI=/path/to/reviewcalm." >&2
+      echo "Tip: omit --use-cli to use this helper's built-in deep-link opener/print fallback." >&2
+      exit 1
+    fi
+    exec "$cli" "$url"
+  fi
+
+  if open_deep_link "$deep_link"; then
+    printf 'Opened in ReviewCalm: %s\n' "$url"
+    exit 0
+  fi
+
+  echo "No local browser/URL opener detected; open this link on a machine with ReviewCalm installed:"
+  print_reviewcalm_link "$url" "$deep_link"
 }
 
 main "$@"
