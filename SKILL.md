@@ -1,10 +1,12 @@
 ---
 name: open-in-reviewcalm
-argument-hint: "<github-pr-url|owner/repo#N>"
+argument-hint: "[github-pr-url|owner/repo#N]"
 description: >
   Open a GitHub pull request in the ReviewCalm desktop app from the terminal.
-  Use when the user asks to open, view, or review a PR in ReviewCalm, or to
-  focus an already-open PR tab in ReviewCalm. Accepts a GitHub PR URL,
+  With no argument, opens the PR for the current git branch using gh pr view;
+  if no PR exists, ask whether to create one. Use when the user asks to open,
+  view, or review a PR in ReviewCalm, or to focus an already-open PR tab in
+  ReviewCalm. Accepts a GitHub PR URL,
   owner/repo#number, owner/repo/pull/number, github.com/<owner>/<repo>/pull/<number>,
   or three args owner repo number. Launches ReviewCalm if it isn't running and
   re-focuses the existing tab if that PR is already open.
@@ -29,6 +31,7 @@ agent/user can install and invoke it.
 - "open PR `<url>` in ReviewCalm"
 - "open `<owner>/<repo>#<number>` in ReviewCalm"
 - "open this pull request in review calm" / "view in review calm"
+- "open the current branch PR in ReviewCalm"
 - "focus the reviewcalm tab for PR `<number>`"
 
 ## Prerequisites (one-time)
@@ -53,8 +56,11 @@ Codex, and generic shell-capable agents. Where supported, the install exposes a
 slash command:
 
 ```text
-/open-in-reviewcalm <github-pr-url|owner/repo#N>
+/open-in-reviewcalm [github-pr-url|owner/repo#N]
 ```
+
+With no argument, the command opens the PR for the current git branch using
+`gh pr view`. If no PR exists, report that and ask whether to create a PR.
 
 Codex currently namespaces custom prompts as `/prompts:open-in-reviewcalm` and
 supports skills via `$open-in-reviewcalm` / `/skills` rather than arbitrary
@@ -74,6 +80,7 @@ Run the helper from the skill directory, passing a PR reference in any of
 these forms:
 
 ```sh
+./scripts/open-reviewcalm.sh                         # current branch PR via gh pr view
 ./scripts/open-reviewcalm.sh https://github.com/owner/repo/pull/123
 ./scripts/open-reviewcalm.sh owner/repo#123
 ./scripts/open-reviewcalm.sh owner/repo/pull/123
@@ -83,15 +90,18 @@ these forms:
 
 The helper:
 
-1. Normalizes the reference to a canonical
+1. If no reference is provided, finds the PR for the current branch with
+   `gh pr view --json url --jq .url`. If none exists, asks whether to create a
+   PR instead of opening anything.
+2. Normalizes the reference to a canonical
    `https://github.com/<lowercased-owner>/<lowercased-repo>/pull/<number>` URL
    (owner/repo are case-insensitive on GitHub, so lower-casing guarantees the
    same PR always maps to the same ReviewCalm tab id `<owner>/<repo>#<number>` —
    this is what makes "focus the existing tab" reliable).
-2. Validates it (GitHub host, `/pull/<positive integer>`). Incorrect input exits
+3. Validates it (GitHub host, `/pull/<positive integer>`). Incorrect input exits
    non-zero with a single error message.
-3. Builds a `reviewcalm://open?url=<encoded>` deep link.
-4. Opens the link through the local browser/URL opener when available; otherwise
+4. Builds a `reviewcalm://open?url=<encoded>` deep link.
+5. Opens the link through the local browser/URL opener when available; otherwise
    prints a clickable/copyable link for headless/VPS sessions.
 
 ### Dry run / inspection

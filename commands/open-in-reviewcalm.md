@@ -1,15 +1,17 @@
 ---
 description: Open a GitHub PR in ReviewCalm
-argument-hint: "<github-pr-url|owner/repo#N>"
+argument-hint: "[github-pr-url|owner/repo#N]"
 ---
 
-Open the GitHub pull request specified by `$ARGUMENTS` in ReviewCalm.
+Open a GitHub pull request in ReviewCalm.
 
 Run this shell command:
 
 ```sh
 open-reviewcalm $ARGUMENTS
 ```
+
+If `$ARGUMENTS` is empty, `open-reviewcalm` will use `gh pr view` to find the PR for the current git branch. If no PR exists for the current branch, report that to the user and ask whether they want to create a PR.
 
 Behavior:
 
